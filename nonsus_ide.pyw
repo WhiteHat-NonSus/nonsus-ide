@@ -7,6 +7,13 @@ import threading
 from tkinter import ttk
 import re
 
+def set_dpi_awareness():
+    try:
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(1)
+    except Exception as e:
+        print(f"Error setting DPI awareness: {e}")
+
 class NonsusIDE(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -68,7 +75,7 @@ class NonsusIDE(tk.Tk):
         self.file_explorer_frame = ttk.Frame(self.panes, style="FileExplorer.TFrame")
         self.file_explorer_frame.pack(side=tk.LEFT, fill=tk.BOTH)
 
-        self.file_explorer = tk.Text(self.file_explorer_frame, bg='white', highlightthickness=0)
+        self.file_explorer = tk.Listbox(self.file_explorer_frame, bg='white', highlightthickness=0, selectbackground='lightgray', selectforeground='black')
         self.file_explorer.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
         self.file_explorer.bind("<Double-1>", self.on_file_explorer_double_click)
         self.file_explorer.bind("<Button-3>", self.show_file_explorer_menu)
@@ -85,32 +92,45 @@ class NonsusIDE(tk.Tk):
         self.refresh_file_explorer()
 
     def open_file_as_tab(self, filepath):
-        with open(filepath, 'r', encoding='utf-8') as file:
-            content = file.read()
-        editor = ScrolledText(self.editor_notebook, font='TkDefaultFont')
-        editor.insert(tk.END, content)
-        editor.pack(fill=tk.BOTH, expand=1)
-        self.editor_notebook.add(editor, text=os.path.basename(filepath))
-        self.editor_notebook.select(editor)
-        self.add_close_button(editor)
-        self.apply_syntax_highlighting(editor)
-        editor.bind("<<Modified>>", self.on_code_change)
-        editor.bind("<Button-3>", self.show_code_editor_menu)
+        supported_extensions = ['.txt', '.py', '.java', '.cpp', '.c', '.html', '.css', '.js', '.vbs', '.bat', '.cmd', '.sh', '.php', '.pyw']  # 支持的文件类型列表
+        file_extension = os.path.splitext(filepath)[1]
+    
+        if file_extension.lower() in supported_extensions:
+            with open(filepath, 'r', encoding='utf-8') as file:
+                content = file.read()
+            editor = ScrolledText(self.editor_notebook, font='TkDefaultFont')
+            editor.insert(tk.END, content)
+            editor.pack(fill=tk.BOTH, expand=1)
+            self.editor_notebook.add(editor, text=os.path.basename(filepath))
+            self.editor_notebook.select(editor)
+            self.add_close_button(editor)
+            self.apply_syntax_highlighting(editor)
+            editor.bind("<<Modified>>", self.on_code_change)
+            editor.bind("<Button-3>", self.show_code_editor_menu)
+        else:
+            unsupported_file_message = "不受支持的文件类型"
+            editor = tk.Text(self.editor_notebook)
+            editor.insert(tk.END, unsupported_file_message)
+            editor.pack(fill=tk.BOTH, expand=1)
+            self.editor_notebook.add(editor, text=os.path.basename(filepath))
+            self.editor_notebook.select(editor)
+            self.add_close_button(editor)
+    
 
     def on_file_explorer_double_click(self, event):
-        index = self.file_explorer.index("@%s,%s" % (event.x, event.y))
-        line = self.file_explorer.get(f"{index} linestart", f"{index} lineend")
-        selected_item = line.strip()
-        if selected_item == "..":
-            self.current_directory = os.path.dirname(self.current_directory)
-            self.refresh_file_explorer()
-        else:
-            full_path = os.path.join(self.current_directory, selected_item)
-            if os.path.isfile(full_path):
-                self.open_file_as_tab(full_path)
-            elif os.path.isdir(full_path):
-                self.current_directory = full_path
+        index = self.file_explorer.curselection()
+        if index:
+            selected_item = self.file_explorer.get(index)
+            if selected_item == "..":
+                self.current_directory = os.path.dirname(self.current_directory)
                 self.refresh_file_explorer()
+            else:
+                full_path = os.path.join(self.current_directory, selected_item)
+                if os.path.isfile(full_path):
+                    self.open_file_as_tab(full_path)
+                elif os.path.isdir(full_path):
+                    self.current_directory = full_path
+                    self.refresh_file_explorer()
 
     def close_current_tab(self):
         current_tab = self.editor_notebook.select()
@@ -118,7 +138,7 @@ class NonsusIDE(tk.Tk):
             self.editor_notebook.forget(current_tab)
 
     def add_close_button(self, tab):
-        close_button = tk.Button(tab, text="✕", command=lambda: self.close_current_tab())
+        close_button = tk.Button(tab, text="✕  关闭标签页", command=lambda: self.close_current_tab())
         close_button.place(relx=0.95, rely=0.02, anchor=tk.NE)
 
     def create_close_button(self, event):
@@ -193,9 +213,9 @@ class NonsusIDE(tk.Tk):
                 stdout, stderr = process.communicate()
                 self.terminal.insert(tk.END, stdout)
                 self.terminal.insert(tk.END, stderr)
-                self.terminal.see(tk.END)  # Scroll to the end of the text box
+                self.terminal.see(tk.END)  # Scroll to the end
+
             threading.Thread(target=run_command).start()
-        return "break"
 
     def show_file_explorer_menu(self, event):
         menu = tk.Menu(self, tearoff=0)
@@ -206,111 +226,83 @@ class NonsusIDE(tk.Tk):
         menu.post(event.x_root, event.y_root)
 
     def new_file(self):
-        filename = simpledialog.askstring("新建文件", "请输入文件名：")
-        if filename:
-            open(os.path.join(self.current_directory, filename), 'w').close()
+        new_filename = simpledialog.askstring("新建文件", "输入文件名:")
+        if new_filename:
+            new_file_path = os.path.join(self.current_directory, new_filename)
+            open(new_file_path, 'a').close()
             self.refresh_file_explorer()
 
     def new_folder(self):
-        foldername = simpledialog.askstring("新建文件夹", "请输入文件夹名：")
-        if foldername:
-            os.makedirs(os.path.join(self.current_directory, foldername), exist_ok=True)
+        new_foldername = simpledialog.askstring("新建文件夹", "输入文件夹名:")
+        if new_foldername:
+            new_folder_path = os.path.join(self.current_directory, new_foldername)
+            os.makedirs(new_folder_path, exist_ok=True)
             self.refresh_file_explorer()
 
     def delete_item(self):
-        index = self.file_explorer.index(tk.ACTIVE)
-        line = self.file_explorer.get(f"{index}.0", f"{index}.end")
-        selected_item = line.strip()
-        full_path = os.path.join(self.current_directory, selected_item)
-        if os.path.isdir(full_path):
-            os.rmdir(full_path)
-        else:
-            os.remove(full_path)
-        self.refresh_file_explorer()
+        index = self.file_explorer.curselection()
+        if index:
+            selected_item = self.file_explorer.get(index).strip()
+            full_path = os.path.join(self.current_directory, selected_item)
+            if os.path.isdir(full_path):
+                os.rmdir(full_path)
+            elif os.path.isfile(full_path):
+                os.remove(full_path)
+            self.refresh_file_explorer()
 
     def rename_item(self):
-        index = self.file_explorer.index(tk.ACTIVE)
-        line = self.file_explorer.get(f"{index}.0", f"{index}.end")
-        selected_item = line.strip()
-        full_path = os.path.join(self.current_directory, selected_item)
-        new_name = simpledialog.askstring("重命名", "请输入新名称：")
-        if new_name:
-            os.rename(full_path, os.path.join(self.current_directory, new_name))
-        self.refresh_file_explorer()
+        index = self.file_explorer.curselection()
+        if index:
+            selected_item = self.file_explorer.get(index).strip()
+            new_name = simpledialog.askstring("重命名", "输入新的名称:", initialvalue=selected_item)
+            if new_name:
+                full_path = os.path.join(self.current_directory, selected_item)
+                new_path = os.path.join(self.current_directory, new_name)
+                os.rename(full_path, new_path)
+                self.refresh_file_explorer()
 
     def refresh_file_explorer(self):
-        self.file_explorer.config(state=tk.NORMAL)
-        self.file_explorer.delete(1.0, tk.END)
-        if self.current_directory != os.path.abspath(os.sep):
-            self.file_explorer.insert(tk.END, "..\n")
-        for item in os.listdir(self.current_directory):
-            item_path = os.path.join(self.current_directory, item)
-            if os.path.isdir(item_path):
-                self.file_explorer.insert(tk.END, item + "\n", "folder")
-            elif os.access(item_path, os.X_OK):
-                self.file_explorer.insert(tk.END, item + "\n", "executable")
-            else:
-                self.file_explorer.insert(tk.END, item + "\n")
-        self.file_explorer.tag_configure("folder", foreground="purple")
-        self.file_explorer.tag_configure("executable", foreground="green")
-        self.file_explorer.config(state=tk.DISABLED)
+        self.file_explorer.delete(0, tk.END)
+        if self.current_directory:
+            self.file_explorer.insert(tk.END, "..")
+            self.file_explorer.itemconfig(tk.END, {'fg': 'purple', 'selectbackground': '', 'selectforeground': ''})
+            for item in os.listdir(self.current_directory):
+                self.file_explorer.insert(tk.END, item)
+                full_path = os.path.join(self.current_directory, item)
+                if os.path.isdir(full_path):
+                    self.file_explorer.itemconfig(tk.END, {'fg': 'purple', 'selectbackground': '', 'selectforeground': ''})
+                elif full_path.endswith('.exe') or full_path.endswith('.sh'):
+                    self.file_explorer.itemconfig(tk.END, {'fg': 'green', 'selectbackground': '', 'selectforeground': ''})
 
-    def show_about(self):
-        messagebox.showinfo("关于", "Nonsus IDE 2024\n\n作者: Nonsus\n\n版权所有 © 2024 Nonsus")
 
     def apply_syntax_highlighting(self, editor):
-        code = editor.get(1.0, tk.END)
-        editor.tag_remove("keyword", "1.0", tk.END)
-        editor.tag_remove("string", "1.0", tk.END)
-        editor.tag_remove("comment", "1.0", tk.END)
+        content = editor.get(1.0, tk.END)
+        self.highlight_pattern(editor, r'\b(class|def|return|if|else|elif|for|while|try|except|with|as|import|from|None|True|False)\b', 'keyword')
+        self.highlight_pattern(editor, r'".*?"|\'.*?\'', 'string')
+        self.highlight_pattern(editor, r'#.*', 'comment')
 
-        keyword_pattern = re.compile(r'\b(class|def|return|if|else|elif|for|while|try|except|import|from|as|with|lambda|yield|pass|continue|break|assert|nonlocal|global|True|False|None|and|or|not|is|in)\b')
-        string_pattern = re.compile(r'(".*?"|\'.*?\')')
-        comment_pattern = re.compile(r'(#.*?$)', re.MULTILINE)
+    def highlight_pattern(self, editor, pattern, tag):
+        start = 1.0
+        end = tk.END
+        editor.mark_set("matchStart", start)
+        editor.mark_set("matchEnd", start)
+        editor.mark_set("searchLimit", end)
 
-        start = "1.0"
+        count = tk.IntVar()
         while True:
-            match = keyword_pattern.search(code)
-            if not match:
-                break
-            start_index = f"{start}+{match.start()}c"
-            end_index = f"{start}+{match.end()}c"
-            editor.tag_add("keyword", start_index, end_index)
-            code = code[match.end():]
-
-        start = "1.0"
-        while True:
-            match = string_pattern.search(code)
-            if not match:
-                break
-            start_index = f"{start}+{match.start()}c"
-            end_index = f"{start}+{match.end()}c"
-            editor.tag_add("string", start_index, end_index)
-            code = code[match.end():]
-
-        start = "1.0"
-        while True:
-            match = comment_pattern.search(code)
-            if not match:
-                break
-            start_index = f"{start}+{match.start()}c"
-            end_index = f"{start}+{match.end()}c"
-            editor.tag_add("comment", start_index, end_index)
-            code = code[match.end():]
-
-        editor.tag_configure("keyword", foreground="blue")
-        editor.tag_configure("string", foreground="orange")
-        editor.tag_configure("comment", foreground="green")
+            index = editor.search(pattern, "matchEnd", "searchLimit", count=count, regexp=True)
+            if index == "": break
+            editor.mark_set("matchStart", index)
+            editor.mark_set("matchEnd", f"{index}+{count.get()}c")
+            editor.tag_add(tag, "matchStart", "matchEnd")
+            editor.tag_config('keyword', foreground='blue')
+            editor.tag_config('string', foreground='green')
+            editor.tag_config('comment', foreground='gray')
 
     def on_code_change(self, event):
         editor = event.widget
         editor.edit_modified(False)
         self.apply_syntax_highlighting(editor)
-
-    def focused_editor_event(self, sequence):
-        focused_widget = self.focus_get()
-        if isinstance(focused_widget, tk.Text) or isinstance(focused_widget, ScrolledText):
-            focused_widget.event_generate(sequence)
 
     def show_code_editor_menu(self, event):
         menu = tk.Menu(self, tearoff=0)
@@ -322,6 +314,18 @@ class NonsusIDE(tk.Tk):
         menu.add_command(label="粘贴", command=lambda: self.focused_editor_event("<<Paste>>"))
         menu.post(event.x_root, event.y_root)
 
-if __name__ == "__main__":
+    def focused_editor_event(self, event):
+        editor = self.editor_notebook.nametowidget(self.editor_notebook.select())
+        if editor:
+            editor.event_generate(event)
+
+    def show_about(self):
+        messagebox.showinfo("关于", "Nonsus IDE 2024\n版本 1.0\n作者: 你的名字")
+
+def main():
+    set_dpi_awareness()
     app = NonsusIDE()
     app.mainloop()
+
+if __name__ == "__main__":
+    main()
